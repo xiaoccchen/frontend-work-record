@@ -36,3 +36,32 @@ export interface Project {
   description: string | null
   created_at: string
 }
+
+/** 统计周期区间，均为 YYYY-MM-DD */
+export interface Period {
+  start: string
+  end: string
+}
+
+/** 总结模板：通用标准版 / 技术侧重版 */
+export type SummaryTemplateId = 'standard' | 'tech'
+
+export interface SummaryTemplateMeta {
+  id: SummaryTemplateId
+  name: string
+  description: string
+}
+
+/** 已保存的历史总结 */
+export interface WorkSummary {
+  id: number
+  title: string
+  period_start: string
+  period_end: string
+  template: SummaryTemplateId
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export type WorkSummaryDraft = Omit<WorkSummary, 'id' | 'created_at' | 'updated_at'>
