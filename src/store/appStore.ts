@@ -14,6 +14,9 @@ export function createEmptyDraft(logDate: string = formatLogDate()): WorkRecordD
     work_type: null,
     remark: null,
     estimated_hours: null,
+    is_key: false,
+    workload: null,
+    tags: [],
   }
 }
 
@@ -32,6 +35,15 @@ export const useAppStore = create<AppState>()(
       setDraft: (patch) => set({ draft: { ...get().draft, ...patch } }),
       resetDraft: (logDate) => set({ draft: createEmptyDraft(logDate) }),
     }),
-    { name: 'frontend-work-record:app' },
+    {
+      name: 'frontend-work-record:app',
+      version: 1,
+      // 结构未变，仅草稿新增了字段，具体补默认值交给 merge
+      migrate: (persisted) => persisted as AppState,
+      merge: (persisted, current) => {
+        const state = persisted as { draft?: Partial<WorkRecordDraft> }
+        return { ...current, draft: { ...createEmptyDraft(), ...state.draft } }
+      },
+    },
   ),
 )

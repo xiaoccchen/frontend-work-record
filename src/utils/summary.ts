@@ -1,8 +1,11 @@
-import type { Period, SummaryTemplateId, WorkRecord } from '@/types'
+import type { Period, SummaryTemplateId, WorkloadLevel, WorkRecord } from '@/types'
 
 const UNCATEGORIZED = '未分类'
 const PROBLEM_TYPES = ['Bug 修复']
 const ACCUMULATION_TYPES = ['学习调研', '代码 Review']
+
+/** 工作量等级权重，用于排序时把繁重的工作排在前面 */
+const WORKLOAD_WEIGHT: Record<WorkloadLevel, number> = { 轻量: 1, 常规: 2, 繁重: 3 }
 
 interface TypeGroup {
   type: string
@@ -24,8 +27,33 @@ function formatHours(hours: number): string {
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(1)
 }
 
-function sortByHoursDesc(records: WorkRecord[]): WorkRecord[] {
-  return [...records].sort((a, b) => (b.estimated_hours ?? 0) - (a.estimated_hours ?? 0))
+/**
+ * 重点内容优先排序：重点工作 > 工作量等级 > 预估工时。
+ * 生成总结时按此顺序输出，保证核心业绩排在各分组最前面。
+ */
+function sortByPriority(records: WorkRecord[]): WorkRecord[] {
+  return [...records].sort((a, b) => {
+    if (a.is_key !== b.is_key) {
+      return a.is_key ? -1 : 1
+    }
+    const weightDiff =
+      (b.workload ? WORKLOAD_WEIGHT[b.workload] : 0) - (a.workload ? WORKLOAD_WEIGHT[a.workload] : 0)
+    if (weightDiff !== 0) {
+      return weightDiff
+    }
+    return (b.estimated_hours ?? 0) - (a.estimated_hours ?? 0)
+  })
+}
+
+/** 重点工作加前缀，导出后在纯文本里也能一眼看到 */
+function markKey(record: WorkRecord, text: string): string {
+  return record.is_key ? `【重点】${text}` : text
+}
+
+/** 概述里只取内容首行并截断，避免多行内容打乱段落 */
+function briefContent(text: string, maxLength = 40): string {
+  const [firstLine = ''] = text.split('\n')
+  return firstLine.length > maxLength ? `${firstLine.slice(0, maxLength)}…` : firstLine
 }
 
 function groupByType(records: WorkRecord[]): TypeGroup[] {
@@ -35,7 +63,7 @@ function groupByType(records: WorkRecord[]): TypeGroup[] {
     groups.set(key, [...(groups.get(key) ?? []), record])
   })
   return [...groups.entries()]
-    .map(([type, list]) => ({ type, records: sortByHoursDesc(list), hours: sumHours(list) }))
+    .map(([type, list]) => ({ type, records: sortByPriority(list), hours: sumHours(list) }))
     .sort((a, b) => b.hours - a.hours || b.records.length - a.records.length)
 }
 
@@ -45,7 +73,7 @@ function groupByProject(records: WorkRecord[]): ProjectGroup[] {
     groups.set(record.project_name, [...(groups.get(record.project_name) ?? []), record])
   })
   return [...groups.entries()]
-    .map(([name, list]) => ({ name, records: sortByHoursDesc(list), hours: sumHours(list) }))
+    .map(([name, list]) => ({ name, records: sortByPriority(list), hours: sumHours(list) }))
     .sort((a, b) => b.hours - a.hours || b.records.length - a.records.length)
 }
 
@@ -58,6 +86,24 @@ function toBullet(text: string): string {
   return `- ${text.replace(/\n/g, '\n  ')}`
 }
 
+/** 概述里的工作量分布，全部未标注时不展示 */
+function renderWorkloadDistribution(records: WorkRecord[]): string | null {
+  const parts = (['繁重', '常规', '轻量'] as WorkloadLevel[])
+    .map((level) => ({ level, count: records.filter((record) => record.workload === level).length }))
+    .filter((item) => item.count > 0)
+    .map((item) => `${item.level} ${item.count} 项`)
+
+  if (parts.length === 0) {
+    return null
+  }
+
+  const unlabeled = records.filter((record) => !record.workload).length
+  if (unlabeled > 0) {
+    parts.push(`未标注 ${unlabeled} 项`)
+  }
+  return `工作量分布：${parts.join('；')}。`
+}
+
 function renderOverview(
   records: WorkRecord[],
   period: Period,
@@ -65,15 +111,31 @@ function renderOverview(
 ): string {
   const projects = uniqueProjects(records)
   const groups = groupByType(records)
+  const keyRecords = sortByPriority(records.filter((record) => record.is_key))
   const lines = [
     '## 一、周期工作概述',
     '',
-    `本周期（${period.start} 至 ${period.end}）共完成工作 ${records.length} 项，涉及项目 ${projects.length} 个（${projects.join('、')}），累计预估工时 ${formatHours(sumHours(records))} 小时。`,
+    `本周期（${period.start} 至 ${period.end}）共完成工作 ${records.length} 项（其中重点工作 ${keyRecords.length} 项），涉及项目 ${projects.length} 个（${projects.join('、')}），累计预估工时 ${formatHours(sumHours(records))} 小时。`,
     '',
     `工作类型分布：${groups
       .map((group) => `${group.type} ${group.records.length} 项（${formatHours(group.hours)} 小时）`)
       .join('；')}。`,
   ]
+
+  // 重点工作单独列出，避免淹没在类型分布里
+  if (keyRecords.length > 0) {
+    lines.push(
+      '',
+      `重点工作：${keyRecords
+        .map((record) => `【${record.project_name}】${briefContent(record.work_content)}`)
+        .join('；')}。`,
+    )
+  }
+
+  const workloadLine = renderWorkloadDistribution(records)
+  if (workloadLine) {
+    lines.push('', workloadLine)
+  }
 
   if (templateId === 'tech') {
     lines.push(
@@ -95,23 +157,33 @@ function renderAchievements(
 
   if (templateId === 'tech') {
     groupByProject(records).forEach((group) => {
-      lines.push(`**${group.name}（${group.records.length} 项，${formatHours(group.hours)} 小时）**`)
+      const keyCount = group.records.filter((record) => record.is_key).length
+      const keySuffix = keyCount > 0 ? `，含重点 ${keyCount} 项` : ''
+      lines.push(
+        `**${group.name}（${group.records.length} 项，${formatHours(group.hours)} 小时${keySuffix}）**`,
+      )
       group.records.forEach((record) => {
         const meta = [
           record.work_type,
+          record.workload,
           record.estimated_hours != null ? `${record.estimated_hours} 小时` : null,
         ]
           .filter(Boolean)
           .join('，')
-        lines.push(toBullet(meta ? `${record.work_content}（${meta}）` : record.work_content))
+        const text = meta ? `${record.work_content}（${meta}）` : record.work_content
+        lines.push(toBullet(markKey(record, text)))
       })
       lines.push('')
     })
   } else {
     groupByType(records).forEach((group) => {
-      lines.push(`**${group.type}（${group.records.length} 项，${formatHours(group.hours)} 小时）**`)
+      const keyCount = group.records.filter((record) => record.is_key).length
+      const keySuffix = keyCount > 0 ? `，含重点 ${keyCount} 项` : ''
+      lines.push(
+        `**${group.type}（${group.records.length} 项，${formatHours(group.hours)} 小时${keySuffix}）**`,
+      )
       group.records.forEach((record) => {
-        lines.push(toBullet(`【${record.project_name}】${record.work_content}`))
+        lines.push(toBullet(markKey(record, `【${record.project_name}】${record.work_content}`)))
       })
       lines.push('')
     })
@@ -121,29 +193,33 @@ function renderAchievements(
 }
 
 function renderProblems(records: WorkRecord[]): string {
-  const problems = records.filter(
-    (record) => record.work_type != null && PROBLEM_TYPES.includes(record.work_type),
+  const problems = sortByPriority(
+    records.filter((record) => record.work_type != null && PROBLEM_TYPES.includes(record.work_type)),
   )
   if (problems.length === 0) {
     return `## 三、问题与优化\n\n本周期无 Bug 修复类记录。\n`
   }
   const lines = ['## 三、问题与优化', '']
   problems.forEach((record) => {
-    lines.push(toBullet(`【${record.project_name}】${record.work_content}`))
+    lines.push(toBullet(markKey(record, `【${record.project_name}】${record.work_content}`)))
   })
   return `${lines.join('\n')}\n`
 }
 
 function renderAccumulation(records: WorkRecord[]): string {
-  const items = records.filter(
-    (record) => record.work_type != null && ACCUMULATION_TYPES.includes(record.work_type),
+  const items = sortByPriority(
+    records.filter(
+      (record) => record.work_type != null && ACCUMULATION_TYPES.includes(record.work_type),
+    ),
   )
   if (items.length === 0) {
     return `## 四、技术沉淀\n\n本周期暂无技术调研、代码评审类记录。\n`
   }
   const lines = ['## 四、技术沉淀', '']
   items.forEach((record) => {
-    lines.push(toBullet(`【${record.work_type}·${record.project_name}】${record.work_content}`))
+    lines.push(
+      toBullet(markKey(record, `【${record.work_type}·${record.project_name}】${record.work_content}`)),
+    )
   })
   return `${lines.join('\n')}\n`
 }

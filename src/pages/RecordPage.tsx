@@ -11,6 +11,7 @@ import {
   InputNumber,
   Select,
   Space,
+  Switch,
   TimePicker,
 } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
@@ -18,10 +19,12 @@ import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '@/components/PageHeader'
 import { useAppStore } from '@/store/appStore'
+import { useProjectStore } from '@/store/projectStore'
 import { useRecordStore } from '@/store/recordStore'
-import type { WorkRecord, WorkRecordDraft, WorkType } from '@/types'
-import { WORK_TYPES } from '@/utils/constants'
+import type { WorkloadLevel, WorkRecord, WorkRecordDraft, WorkType } from '@/types'
+import { WORKLOAD_LEVELS, WORK_TYPES } from '@/utils/constants'
 import { formatLogDate } from '@/utils/date'
+import { getErrorMessage } from '@/utils/error'
 
 const { RangePicker } = TimePicker
 
@@ -34,6 +37,9 @@ interface RecordFormValues {
   work_content: string
   estimated_hours: number | null
   remark: string | null
+  is_key: boolean
+  workload: WorkloadLevel | null
+  tags: string[]
 }
 
 function toFormValues(record: WorkRecordDraft): RecordFormValues {
@@ -48,6 +54,9 @@ function toFormValues(record: WorkRecordDraft): RecordFormValues {
     work_content: record.work_content,
     estimated_hours: record.estimated_hours,
     remark: record.remark,
+    is_key: record.is_key ?? false,
+    workload: record.workload ?? null,
+    tags: record.tags ?? [],
   }
 }
 
@@ -61,6 +70,9 @@ function toDraft(values: RecordFormValues): WorkRecordDraft {
     work_content: (values.work_content ?? '').trim(),
     estimated_hours: values.estimated_hours ?? null,
     remark: values.remark?.trim() || null,
+    is_key: values.is_key ?? false,
+    workload: values.workload ?? null,
+    tags: (values.tags ?? []).map((tag) => tag.trim()).filter(Boolean),
   }
 }
 
@@ -71,11 +83,13 @@ interface RecordFormProps {
 
 function RecordForm({ record }: RecordFormProps) {
   const [form] = Form.useForm<RecordFormValues>()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const navigate = useNavigate()
   const records = useRecordStore((state) => state.records)
   const addRecord = useRecordStore((state) => state.addRecord)
   const updateRecord = useRecordStore((state) => state.updateRecord)
+  const projects = useProjectStore((state) => state.projects)
+  const addProject = useProjectStore((state) => state.addProject)
   const draft = useAppStore((state) => state.draft)
   const setDraft = useAppStore((state) => state.setDraft)
   const resetDraft = useAppStore((state) => state.resetDraft)
@@ -87,26 +101,51 @@ function RecordForm({ record }: RecordFormProps) {
     (item) => item.log_date === formatLogDate(logDate) && item.id !== record?.id,
   ).length
 
-  const projectOptions = useMemo(
-    () =>
-      Array.from(new Set(records.map((item) => item.project_name)))
-        .filter(Boolean)
-        .map((name) => ({ value: name })),
-    [records],
-  )
+  // 项目名候选：项目字典 ∪ 历史日志里用过的名称
+  const projectOptions = useMemo(() => {
+    const names = new Set(projects.map((item) => item.name))
+    records.forEach((item) => {
+      if (item.project_name) {
+        names.add(item.project_name)
+      }
+    })
+    return Array.from(names).map((name) => ({ value: name }))
+  }, [projects, records])
 
-  const handleFinish = (values: RecordFormValues) => {
+  /** 新项目名入库前先问一次，避免字典被临时名称污染 */
+  const offerToSaveProject = (name: string) => {
+    if (!name || projects.some((item) => item.name === name)) {
+      return
+    }
+    modal.confirm({
+      title: '加入项目字典？',
+      content: `「${name}」不在项目字典中，是否加入以便下次直接选择？`,
+      okText: '加入',
+      cancelText: '暂不',
+      onOk: async () => {
+        try {
+          await addProject({ name, description: null })
+          message.success('已加入项目字典')
+        } catch (error) {
+          message.error(getErrorMessage(error))
+        }
+      },
+    })
+  }
+
+  const handleFinish = async (values: RecordFormValues) => {
     const data = toDraft(values)
 
     if (record) {
-      updateRecord(record.id, data)
+      await updateRecord(record.id, data)
       message.success('日志已更新')
       navigate('/records')
       return
     }
 
-    addRecord(data)
+    await addRecord(data)
     message.success('日志已保存')
+    offerToSaveProject(data.project_name)
     // 保留刚保存的日期，方便同一天继续补录
     resetDraft(data.log_date)
     form.setFieldsValue({
@@ -116,6 +155,9 @@ function RecordForm({ record }: RecordFormProps) {
       work_content: '',
       estimated_hours: null,
       remark: null,
+      is_key: false,
+      workload: null,
+      tags: [],
     })
   }
 
@@ -177,6 +219,34 @@ function RecordForm({ record }: RecordFormProps) {
           rules={[{ required: true, message: '请输入工作内容' }]}
         >
           <Input.TextArea rows={5} placeholder="填写具体需求、页面模块、修复的问题、优化点等，支持换行" />
+        </Form.Item>
+
+        <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2">
+          <Form.Item name="workload" label="工作量等级">
+            <Select
+              allowClear
+              placeholder="轻量 / 常规 / 繁重"
+              options={WORKLOAD_LEVELS.map((level) => ({ value: level, label: level }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="is_key"
+            label="重点标记"
+            valuePropName="checked"
+            tooltip="标记为重点后，生成总结时会优先提取并标注"
+          >
+            <Switch checkedChildren="重点" unCheckedChildren="普通" />
+          </Form.Item>
+        </div>
+
+        <Form.Item name="tags" label="标签" tooltip="输入后回车即可添加，便于日志筛选">
+          <Select
+            mode="tags"
+            open={false}
+            suffixIcon={null}
+            tokenSeparators={[',', '，']}
+            placeholder="如：性能优化、兼容性适配、接口联调"
+          />
         </Form.Item>
 
         <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2">
