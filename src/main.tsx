@@ -7,7 +7,9 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import './index.css'
 import { useProjectStore } from '@/store/projectStore'
+import { useQuickPhraseStore } from '@/store/quickPhraseStore'
 import { useRecordStore } from '@/store/recordStore'
+import { useSettingsStore } from '@/store/settingsStore'
 import { useSummaryStore } from '@/store/summaryStore'
 
 dayjs.locale('zh-cn')
@@ -25,6 +27,8 @@ async function bootstrap() {
       useRecordStore.getState().hydrate(),
       useSummaryStore.getState().hydrate(),
       useProjectStore.getState().hydrate(),
+      useQuickPhraseStore.getState().hydrate(),
+      useSettingsStore.getState().hydrate(),
     ])
   } catch (error) {
     console.error('数据载入失败', error)

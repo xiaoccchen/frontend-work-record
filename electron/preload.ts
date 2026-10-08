@@ -22,6 +22,16 @@ const api: DesktopApi = {
     update: (id, patch) => ipcRenderer.invoke('projects:update', id, patch),
     remove: (id) => ipcRenderer.invoke('projects:remove', id),
   },
+  phrases: {
+    list: () => ipcRenderer.invoke('phrases:list'),
+    create: (draft) => ipcRenderer.invoke('phrases:create', draft),
+    update: (id, patch) => ipcRenderer.invoke('phrases:update', id, patch),
+    remove: (id) => ipcRenderer.invoke('phrases:remove', id),
+  },
+  settings: {
+    list: () => ipcRenderer.invoke('settings:list'),
+    set: (key, value) => ipcRenderer.invoke('settings:set', key, value),
+  },
   data: {
     replaceAll: (data) => ipcRenderer.invoke('data:replace-all', data),
     clearAll: () => ipcRenderer.invoke('data:clear-all'),

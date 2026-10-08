@@ -1,9 +1,12 @@
 import { ipcMain } from 'electron'
 import type Database from 'better-sqlite3'
 import type {
+  AppSetting,
   BackupData,
   Project,
   ProjectDraft,
+  QuickPhrase,
+  QuickPhraseDraft,
   WorkRecord,
   WorkRecordDraft,
   WorkSummary,
@@ -12,11 +15,13 @@ import type {
 import {
   formatTimestamp,
   toProject,
+  toQuickPhrase,
   toWorkRecord,
   toWorkRecordParams,
   toWorkSummary,
   toWorkSummaryParams,
   type ProjectRow,
+  type QuickPhraseRow,
   type WorkRecordRow,
   type WorkSummaryRow,
 } from './db'
@@ -69,9 +74,26 @@ export function registerIpcHandlers(db: Database.Database): void {
   `)
   const deleteProject = db.prepare('DELETE FROM project WHERE id = ?')
 
+  const selectPhraseById = db.prepare('SELECT * FROM quick_phrase WHERE id = ?')
+  const selectPhrases = db.prepare('SELECT * FROM quick_phrase ORDER BY id ASC')
+  const insertPhrase = db.prepare(`
+    INSERT INTO quick_phrase (content, created_at)
+    VALUES (@content, @created_at)
+  `)
+  const updatePhrase = db.prepare('UPDATE quick_phrase SET content = @content WHERE id = @id')
+  const deletePhrase = db.prepare('DELETE FROM quick_phrase WHERE id = ?')
+
+  const selectSettings = db.prepare('SELECT * FROM app_setting ORDER BY key ASC')
+  const upsertSetting = db.prepare(`
+    INSERT INTO app_setting (key, value) VALUES (@key, @value)
+    ON CONFLICT(key) DO UPDATE SET value = @value
+  `)
+
   const clearAllRecords = db.prepare('DELETE FROM work_record')
   const clearAllSummaries = db.prepare('DELETE FROM work_summary')
   const clearAllProjects = db.prepare('DELETE FROM project')
+  const clearAllPhrases = db.prepare('DELETE FROM quick_phrase')
+  const clearAllSettings = db.prepare('DELETE FROM app_setting')
 
   function findRecord(id: number): WorkRecord {
     const row = selectRecordById.get(id) as WorkRecordRow | undefined
@@ -95,6 +117,14 @@ export function registerIpcHandlers(db: Database.Database): void {
       throw new Error(`项目 #${id} 不存在`)
     }
     return toProject(row)
+  }
+
+  function findPhrase(id: number): QuickPhrase {
+    const row = selectPhraseById.get(id) as QuickPhraseRow | undefined
+    if (!row) {
+      throw new Error(`快捷短语 #${id} 不存在`)
+    }
+    return toQuickPhrase(row)
   }
 
   ipcMain.handle('records:list', () =>
@@ -192,12 +222,47 @@ export function registerIpcHandlers(db: Database.Database): void {
     deleteProject.run(id)
   })
 
+  ipcMain.handle('phrases:list', () =>
+    (selectPhrases.all() as QuickPhraseRow[]).map(toQuickPhrase),
+  )
+
+  ipcMain.handle('phrases:create', (_event, draft: QuickPhraseDraft) => {
+    const content = draft.content.trim()
+    if (!content) {
+      throw new Error('快捷短语内容不能为空')
+    }
+    const info = insertPhrase.run({ content, created_at: formatTimestamp() })
+    return findPhrase(Number(info.lastInsertRowid))
+  })
+
+  ipcMain.handle('phrases:update', (_event, id: number, patch: Partial<QuickPhraseDraft>) => {
+    const current = findPhrase(id)
+    const content = (patch.content ?? current.content).trim()
+    if (!content) {
+      throw new Error('快捷短语内容不能为空')
+    }
+    updatePhrase.run({ id, content })
+    return findPhrase(id)
+  })
+
+  ipcMain.handle('phrases:remove', (_event, id: number) => {
+    deletePhrase.run(id)
+  })
+
+  ipcMain.handle('settings:list', () => selectSettings.all() as AppSetting[])
+
+  ipcMain.handle('settings:set', (_event, key: string, value: string) => {
+    upsertSetting.run({ key, value })
+  })
+
   ipcMain.handle('data:replace-all', (_event, data: BackupData) => {
     const now = formatTimestamp()
     db.transaction(() => {
       clearAllRecords.run()
       clearAllSummaries.run()
       clearAllProjects.run()
+      clearAllPhrases.run()
+      clearAllSettings.run()
       for (const record of data.records) {
         insertRecord.run({
           ...toWorkRecordParams(record),
@@ -219,6 +284,12 @@ export function registerIpcHandlers(db: Database.Database): void {
           created_at: project.created_at || now,
         })
       }
+      for (const phrase of data.phrases) {
+        insertPhrase.run({ content: phrase.content, created_at: phrase.created_at || now })
+      }
+      for (const setting of data.settings) {
+        upsertSetting.run({ key: setting.key, value: setting.value })
+      }
     })()
   })
 
@@ -227,6 +298,8 @@ export function registerIpcHandlers(db: Database.Database): void {
       clearAllRecords.run()
       clearAllSummaries.run()
       clearAllProjects.run()
+      clearAllPhrases.run()
+      clearAllSettings.run()
     })()
   })
 }

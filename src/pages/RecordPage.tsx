@@ -1,4 +1,4 @@
-import { SaveOutlined } from '@ant-design/icons'
+import { SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import {
   Alert,
   App,
@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   DatePicker,
+  Dropdown,
   Form,
   Input,
   InputNumber,
@@ -20,6 +21,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageHeader from '@/components/PageHeader'
 import { useAppStore } from '@/store/appStore'
 import { useProjectStore } from '@/store/projectStore'
+import { useQuickPhraseStore } from '@/store/quickPhraseStore'
 import { useRecordStore } from '@/store/recordStore'
 import type { WorkloadLevel, WorkRecord, WorkRecordDraft, WorkType } from '@/types'
 import { WORKLOAD_LEVELS, WORK_TYPES } from '@/utils/constants'
@@ -90,6 +92,7 @@ function RecordForm({ record }: RecordFormProps) {
   const updateRecord = useRecordStore((state) => state.updateRecord)
   const projects = useProjectStore((state) => state.projects)
   const addProject = useProjectStore((state) => state.addProject)
+  const phrases = useQuickPhraseStore((state) => state.phrases)
   const draft = useAppStore((state) => state.draft)
   const setDraft = useAppStore((state) => state.setDraft)
   const resetDraft = useAppStore((state) => state.resetDraft)
@@ -131,6 +134,35 @@ function RecordForm({ record }: RecordFormProps) {
         }
       },
     })
+  }
+
+  /** 快捷短语追加到工作内容末尾，不覆盖已输入的内容 */
+  const handleUsePhrase = (content: string) => {
+    const current = String(form.getFieldValue('work_content') ?? '').trimEnd()
+    form.setFieldsValue({ work_content: current ? `${current}\n${content}` : content })
+    // setFieldsValue 不会触发 onValuesChange，新增模式下草稿需要手动同步
+    if (!record) {
+      setDraft(toDraft(form.getFieldsValue()))
+    }
+  }
+
+  const phraseMenu = {
+    items: phrases.length
+      ? phrases.map((phrase) => ({
+          key: String(phrase.id),
+          label: (
+            <span style={{ display: 'block', maxWidth: 320, whiteSpace: 'normal' }}>
+              {phrase.content}
+            </span>
+          ),
+        }))
+      : [{ key: 'empty', label: '暂无快捷短语，可到「设置」中维护', disabled: true }],
+    onClick: ({ key }: { key: string }) => {
+      const phrase = phrases.find((item) => String(item.id) === key)
+      if (phrase) {
+        handleUsePhrase(phrase.content)
+      }
+    },
   }
 
   const handleFinish = async (values: RecordFormValues) => {
@@ -215,7 +247,16 @@ function RecordForm({ record }: RecordFormProps) {
 
         <Form.Item
           name="work_content"
-          label="工作内容"
+          label={
+            <Space size={4}>
+              <span>工作内容</span>
+              <Dropdown menu={phraseMenu} trigger={['click']}>
+                <Button type="link" size="small" icon={<ThunderboltOutlined />}>
+                  快捷短语
+                </Button>
+              </Dropdown>
+            </Space>
+          }
           rules={[{ required: true, message: '请输入工作内容' }]}
         >
           <Input.TextArea rows={5} placeholder="填写具体需求、页面模块、修复的问题、优化点等，支持换行" />

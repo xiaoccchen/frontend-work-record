@@ -49,6 +49,23 @@ export interface Project {
 /** 新增/编辑项目时的表单数据，主键与创建时间由存储层生成 */
 export type ProjectDraft = Omit<Project, 'id' | 'created_at'>
 
+/** quick_phrase 快捷短语表，录入时可一键填充工作内容 */
+export interface QuickPhrase {
+  id: number
+  /** 短语正文 */
+  content: string
+  created_at: string
+}
+
+/** 新增/编辑快捷短语时的表单数据，主键与创建时间由存储层生成 */
+export type QuickPhraseDraft = Omit<QuickPhrase, 'id' | 'created_at'>
+
+/** app_setting 设置表，存放提醒开关等零散配置 */
+export interface AppSetting {
+  key: string
+  value: string
+}
+
 /** 统计周期区间，均为 YYYY-MM-DD */
 export interface Period {
   start: string
@@ -83,6 +100,8 @@ export interface BackupData {
   records: WorkRecord[]
   summaries: WorkSummary[]
   projects: Project[]
+  phrases: QuickPhrase[]
+  settings: AppSetting[]
 }
 
 /** 备份文件结构，schemaVersion 用于后续版本兼容处理 */
@@ -112,6 +131,16 @@ export interface DesktopApi {
     create: (draft: ProjectDraft) => Promise<Project>
     update: (id: number, patch: Partial<ProjectDraft>) => Promise<Project>
     remove: (id: number) => Promise<void>
+  }
+  phrases: {
+    list: () => Promise<QuickPhrase[]>
+    create: (draft: QuickPhraseDraft) => Promise<QuickPhrase>
+    update: (id: number, patch: Partial<QuickPhraseDraft>) => Promise<QuickPhrase>
+    remove: (id: number) => Promise<void>
+  }
+  settings: {
+    list: () => Promise<AppSetting[]>
+    set: (key: string, value: string) => Promise<void>
   }
   data: {
     replaceAll: (data: BackupData) => Promise<void>

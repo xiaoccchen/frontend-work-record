@@ -1,8 +1,10 @@
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
+import { DEFAULT_QUICK_PHRASES } from '../src/utils/constants'
 import type {
   Project,
+  QuickPhrase,
   WorkloadLevel,
   WorkRecord,
   WorkRecordDraft,
@@ -11,7 +13,7 @@ import type {
 } from '../src/types'
 
 /** 表结构版本，通过 PRAGMA user_version 记录，后续字段变更时递增并补 ALTER */
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS work_record (
@@ -50,6 +52,17 @@ CREATE TABLE IF NOT EXISTS work_summary (
   created_at   TEXT NOT NULL,
   updated_at   TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS quick_phrase (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  content    TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_setting (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `
 
 export interface WorkRecordRow {
@@ -87,6 +100,12 @@ export interface ProjectRow {
   created_at: string
 }
 
+export interface QuickPhraseRow {
+  id: number
+  content: string
+  created_at: string
+}
+
 /** 数据库文件放在用户数据目录，卸载应用前不会被清掉 */
 export function openDatabase(): Database.Database {
   const db = new Database(path.join(app.getPath('userData'), 'work-record.db'))
@@ -101,7 +120,21 @@ function migrate(db: Database.Database): void {
     return
   }
   db.exec(SCHEMA)
+  if (version < 2) {
+    seedQuickPhrases(db)
+  }
   db.pragma(`user_version = ${SCHEMA_VERSION}`)
+}
+
+/** 只在升级到 v2 时灌入初值，用户删光后不会再补回来 */
+function seedQuickPhrases(db: Database.Database): void {
+  const now = formatTimestamp()
+  const insert = db.prepare(
+    'INSERT INTO quick_phrase (content, created_at) VALUES (@content, @created_at)',
+  )
+  db.transaction(() => {
+    DEFAULT_QUICK_PHRASES.forEach((content) => insert.run({ content, created_at: now }))
+  })()
 }
 
 /** 本地时间戳，格式与渲染进程保持一致 */
@@ -185,6 +218,14 @@ export function toProject(row: ProjectRow): Project {
     id: row.id,
     name: row.name,
     description: row.description,
+    created_at: row.created_at,
+  }
+}
+
+export function toQuickPhrase(row: QuickPhraseRow): QuickPhrase {
+  return {
+    id: row.id,
+    content: row.content,
     created_at: row.created_at,
   }
 }

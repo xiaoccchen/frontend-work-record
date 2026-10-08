@@ -1,13 +1,17 @@
 import type {
+  AppSetting,
   BackupData,
   DesktopApi,
   Project,
   ProjectDraft,
+  QuickPhrase,
+  QuickPhraseDraft,
   WorkRecord,
   WorkRecordDraft,
   WorkSummary,
   WorkSummaryDraft,
 } from '@/types'
+import { DEFAULT_QUICK_PHRASES } from '@/utils/constants'
 import { formatTimestamp } from '@/utils/date'
 
 /** 数据仓库读写接口，桌面端（SQLite via IPC）与浏览器端（localStorage）各自实现 */
@@ -33,6 +37,19 @@ export interface ProjectRepository {
   remove: (id: number) => Promise<void>
 }
 
+export interface QuickPhraseRepository {
+  list: () => Promise<QuickPhrase[]>
+  create: (draft: QuickPhraseDraft) => Promise<QuickPhrase>
+  update: (id: number, patch: Partial<QuickPhraseDraft>) => Promise<QuickPhrase>
+  remove: (id: number) => Promise<void>
+}
+
+/** 键值型配置，只做读取与覆盖写 */
+export interface SettingsRepository {
+  list: () => Promise<AppSetting[]>
+  set: (key: string, value: string) => Promise<void>
+}
+
 /** 全量数据操作：备份恢复与清空 */
 export interface DataRepository {
   replaceAll: (data: BackupData) => Promise<void>
@@ -42,6 +59,8 @@ export interface DataRepository {
 const RECORDS_KEY = 'frontend-work-record:db:records'
 const SUMMARIES_KEY = 'frontend-work-record:db:summaries'
 const PROJECTS_KEY = 'frontend-work-record:db:projects'
+const PHRASES_KEY = 'frontend-work-record:db:phrases'
+const SETTINGS_KEY = 'frontend-work-record:db:settings'
 /** 旧版 zustand persist 的存储键，仅用于一次性迁移 */
 const LEGACY_RECORDS_KEY = 'frontend-work-record:records'
 const LEGACY_SUMMARIES_KEY = 'frontend-work-record:summaries'
@@ -70,9 +89,18 @@ function nextId(items: { id: number }[]): number {
 type PartialRecord = Partial<WorkRecord> & Pick<WorkRecord, 'id'>
 type PartialSummary = Partial<WorkSummary> & Pick<WorkSummary, 'id'>
 type PartialProject = Partial<Project> & Pick<Project, 'id'>
+type PartialPhrase = Partial<QuickPhrase> & Pick<QuickPhrase, 'id'>
 
 function hasNumberId(value: unknown): value is { id: number } {
   return typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'number'
+}
+
+function isAppSetting(value: unknown): value is AppSetting {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  const item = value as { key?: unknown; value?: unknown }
+  return typeof item.key === 'string' && typeof item.value === 'string'
 }
 
 /** 补齐旧数据缺失的新增字段 */
@@ -113,6 +141,14 @@ function normalizeProject(raw: PartialProject): Project {
     id: raw.id,
     name: raw.name ?? '',
     description: raw.description ?? null,
+    created_at: raw.created_at ?? '',
+  }
+}
+
+function normalizePhrase(raw: PartialPhrase): QuickPhrase {
+  return {
+    id: raw.id,
+    content: raw.content ?? '',
     created_at: raw.created_at ?? '',
   }
 }
@@ -160,6 +196,34 @@ function loadLocalProjects(): Project[] {
 
 function saveLocalProjects(projects: Project[]): void {
   localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects))
+}
+
+function loadLocalPhrases(): QuickPhrase[] {
+  const stored = readJson<unknown[]>(PHRASES_KEY)
+  if (Array.isArray(stored)) {
+    return stored.filter(hasNumberId).map(normalizePhrase)
+  }
+  // 首次运行灌入初值；用户删光后存储里是空数组，不会再补回来
+  const phrases = DEFAULT_QUICK_PHRASES.map((content, index) => ({
+    id: index + 1,
+    content,
+    created_at: formatTimestamp(),
+  }))
+  saveLocalPhrases(phrases)
+  return phrases
+}
+
+function saveLocalPhrases(phrases: QuickPhrase[]): void {
+  localStorage.setItem(PHRASES_KEY, JSON.stringify(phrases))
+}
+
+function loadLocalSettings(): AppSetting[] {
+  const stored = readJson<unknown[]>(SETTINGS_KEY)
+  return Array.isArray(stored) ? stored.filter(isAppSetting) : []
+}
+
+function saveLocalSettings(settings: AppSetting[]): void {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
 }
 
 const localRecordRepository: RecordRepository = {
@@ -269,17 +333,70 @@ const localProjectRepository: ProjectRepository = {
   },
 }
 
+const localQuickPhraseRepository: QuickPhraseRepository = {
+  list: async () => loadLocalPhrases(),
+
+  create: async (draft) => {
+    const phrases = loadLocalPhrases()
+    const content = draft.content.trim()
+    if (!content) {
+      throw new Error('快捷短语内容不能为空')
+    }
+    const phrase: QuickPhrase = { id: nextId(phrases), content, created_at: formatTimestamp() }
+    saveLocalPhrases([...phrases, phrase])
+    return phrase
+  },
+
+  update: async (id, patch) => {
+    const phrases = loadLocalPhrases()
+    const current = phrases.find((item) => item.id === id)
+    if (!current) {
+      throw new Error(`快捷短语 #${id} 不存在`)
+    }
+    const content = (patch.content ?? current.content).trim()
+    if (!content) {
+      throw new Error('快捷短语内容不能为空')
+    }
+    const updated: QuickPhrase = { ...current, content }
+    saveLocalPhrases(phrases.map((item) => (item.id === id ? updated : item)))
+    return updated
+  },
+
+  remove: async (id) => {
+    saveLocalPhrases(loadLocalPhrases().filter((item) => item.id !== id))
+  },
+}
+
+const localSettingsRepository: SettingsRepository = {
+  list: async () => loadLocalSettings(),
+
+  set: async (key, value) => {
+    const settings = loadLocalSettings()
+    const exists = settings.some((item) => item.key === key)
+    saveLocalSettings(
+      exists
+        ? settings.map((item) => (item.key === key ? { key, value } : item))
+        : [...settings, { key, value }],
+    )
+  },
+}
+
 const localDataRepository: DataRepository = {
   replaceAll: async (data) => {
     saveLocalRecords(data.records)
     saveLocalSummaries(data.summaries)
     saveLocalProjects(data.projects)
+    saveLocalPhrases(data.phrases)
+    saveLocalSettings(data.settings)
   },
 
   clearAll: async () => {
     saveLocalRecords([])
     saveLocalSummaries([])
     saveLocalProjects([])
+    // 写入空数组而非删除键，避免下次 load 时重新灌入快捷短语初值
+    saveLocalPhrases([])
+    saveLocalSettings([])
   },
 }
 
@@ -313,6 +430,18 @@ const desktopProjectRepository: ProjectRepository = {
   remove: (id) => requireDesktopApi().projects.remove(id),
 }
 
+const desktopQuickPhraseRepository: QuickPhraseRepository = {
+  list: () => requireDesktopApi().phrases.list(),
+  create: (draft) => requireDesktopApi().phrases.create(draft),
+  update: (id, patch) => requireDesktopApi().phrases.update(id, patch),
+  remove: (id) => requireDesktopApi().phrases.remove(id),
+}
+
+const desktopSettingsRepository: SettingsRepository = {
+  list: () => requireDesktopApi().settings.list(),
+  set: (key, value) => requireDesktopApi().settings.set(key, value),
+}
+
 const desktopDataRepository: DataRepository = {
   replaceAll: (data) => requireDesktopApi().data.replaceAll(data),
   clearAll: () => requireDesktopApi().data.clearAll(),
@@ -332,6 +461,14 @@ export const summaryRepository: SummaryRepository = isDesktop
 export const projectRepository: ProjectRepository = isDesktop
   ? desktopProjectRepository
   : localProjectRepository
+
+export const quickPhraseRepository: QuickPhraseRepository = isDesktop
+  ? desktopQuickPhraseRepository
+  : localQuickPhraseRepository
+
+export const settingsRepository: SettingsRepository = isDesktop
+  ? desktopSettingsRepository
+  : localSettingsRepository
 
 export const dataRepository: DataRepository = isDesktop
   ? desktopDataRepository

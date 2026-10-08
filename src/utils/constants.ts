@@ -28,4 +28,16 @@ export const SUMMARY_TEMPLATES: SummaryTemplateMeta[] = [
 ]
 
 /** 备份文件的数据结构版本，需与 electron/db.ts 的 SCHEMA_VERSION 保持一致 */
-export const DATA_SCHEMA_VERSION = 1
+export const DATA_SCHEMA_VERSION = 2
+
+/** 快捷短语初值，仅在首次建表 / 首次运行时写入 */
+export const DEFAULT_QUICK_PHRASES = [
+  '解决页面兼容性问题，主流浏览器与 IE 表现一致',
+  '优化页面加载性能，首屏渲染时间明显下降',
+  '对接后端接口联调，处理字段映射与异常分支',
+  '修复线上 Bug，补充回归验证用例',
+  '页面样式重构，设计稿还原度对齐',
+  '抽离公共组件，减少重复代码',
+  '代码 Review，跟进评审意见修改',
+  '梳理需求文档，输出前端技术方案',
+]
