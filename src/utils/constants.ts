@@ -30,6 +30,19 @@ export const SUMMARY_TEMPLATES: SummaryTemplateMeta[] = [
 /** 备份文件的数据结构版本，需与 electron/db.ts 的 SCHEMA_VERSION 保持一致 */
 export const DATA_SCHEMA_VERSION = 2
 
+/** app_setting 键名，避免各处硬编码字符串 */
+export const SETTING_KEYS = {
+  /** 记录提醒开关，值为 'true' / 'false' */
+  reminderEnabled: 'reminder.enabled',
+  /** 每日提醒时间，格式 HH:mm */
+  reminderTime: 'reminder.time',
+  /** 上次触发提醒的日期 YYYY-MM-DD，用于当日去重 */
+  reminderLastFiredDate: 'reminder.lastFiredDate',
+} as const
+
+/** 记录提醒默认时间 */
+export const DEFAULT_REMINDER_TIME = '18:00'
+
 /** 快捷短语初值，仅在首次建表 / 首次运行时写入 */
 export const DEFAULT_QUICK_PHRASES = [
   '解决页面兼容性问题，主流浏览器与 IE 表现一致',

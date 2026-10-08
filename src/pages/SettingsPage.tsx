@@ -16,11 +16,14 @@ import {
   Modal,
   Popconfirm,
   Space,
+  Switch,
   Table,
+  TimePicker,
   Typography,
   Upload,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
+import dayjs, { type Dayjs } from 'dayjs'
 import { useMemo, useState } from 'react'
 import PageHeader from '@/components/PageHeader'
 import { dataRepository, isDesktop } from '@/services/repositories'
@@ -30,7 +33,7 @@ import { useRecordStore } from '@/store/recordStore'
 import { useSettingsStore } from '@/store/settingsStore'
 import { useSummaryStore } from '@/store/summaryStore'
 import type { BackupData, BackupFile, Project, ProjectDraft, QuickPhrase, QuickPhraseDraft } from '@/types'
-import { DATA_SCHEMA_VERSION } from '@/utils/constants'
+import { DATA_SCHEMA_VERSION, DEFAULT_REMINDER_TIME, SETTING_KEYS } from '@/utils/constants'
 import { formatLogDate, formatTimestamp } from '@/utils/date'
 import { downloadTextFile } from '@/utils/download'
 import { getErrorMessage } from '@/utils/error'
@@ -362,6 +365,84 @@ function QuickPhraseCard() {
   )
 }
 
+/** 'HH:mm' 字符串转成当天的时间值，TimePicker 需要 Dayjs */
+function toTimeValue(time: string): Dayjs {
+  const [hour, minute] = time.split(':').map(Number)
+  return dayjs().hour(hour).minute(minute).second(0)
+}
+
+function ReminderCard() {
+  const { message } = App.useApp()
+  const settings = useSettingsStore((state) => state.settings)
+  const setSetting = useSettingsStore((state) => state.setSetting)
+  const [saving, setSaving] = useState(false)
+
+  const enabled = settings[SETTING_KEYS.reminderEnabled] === 'true'
+  const reminderTime = settings[SETTING_KEYS.reminderTime] ?? DEFAULT_REMINDER_TIME
+
+  const handleToggle = async (checked: boolean) => {
+    if (
+      checked &&
+      !isDesktop &&
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'default'
+    ) {
+      void Notification.requestPermission()
+    }
+
+    setSaving(true)
+    try {
+      await setSetting(SETTING_KEYS.reminderEnabled, String(checked))
+      message.success(checked ? `已开启每日 ${reminderTime} 记录提醒` : '已关闭记录提醒')
+    } catch (error) {
+      message.error(getErrorMessage(error))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTimeChange = async (value: Dayjs | null) => {
+    if (!value) {
+      return
+    }
+    const next = value.format('HH:mm')
+    try {
+      await setSetting(SETTING_KEYS.reminderTime, next)
+      message.success(`提醒时间已调整为 ${next}`)
+    } catch (error) {
+      message.error(getErrorMessage(error))
+    }
+  }
+
+  return (
+    <Card title="记录提醒">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-3">
+          <Switch checked={enabled} loading={saving} onChange={handleToggle} />
+          <Typography.Text>
+            每日固定时间提醒记录当天工作，通知形式为
+            {isDesktop ? '系统通知' : '浏览器通知（首次开启需授权）'}
+          </Typography.Text>
+        </div>
+        <div className="flex items-center gap-3">
+          <Typography.Text type="secondary">提醒时间</Typography.Text>
+          <TimePicker
+            format="HH:mm"
+            minuteStep={5}
+            allowClear={false}
+            disabled={!enabled}
+            defaultValue={toTimeValue(reminderTime)}
+            onChange={handleTimeChange}
+          />
+        </div>
+        <Typography.Text type="secondary">
+          同一天只提醒一次；点击通知可直接跳转到「工作录入」。
+        </Typography.Text>
+      </div>
+    </Card>
+  )
+}
+
 function DataManagementCard() {
   const { message, modal } = App.useApp()
   const records = useRecordStore((state) => state.records)
@@ -480,8 +561,9 @@ function DataManagementCard() {
 export default function SettingsPage() {
   return (
     <>
-      <PageHeader title="设置" description="项目字典、快捷短语与数据管理" />
+      <PageHeader title="设置" description="记录提醒、项目字典、快捷短语与数据管理" />
       <div className="flex flex-col gap-4">
+        <ReminderCard />
         <ProjectDictionaryCard />
         <QuickPhraseCard />
         <DataManagementCard />

@@ -146,4 +146,10 @@ export interface DesktopApi {
     replaceAll: (data: BackupData) => Promise<void>
     clearAll: () => Promise<void>
   }
+  app: {
+    /** 由主进程弹出系统通知，点击后回传 `app:navigate` */
+    notify: (title: string, body: string) => Promise<void>
+    /** 订阅通知点击后的跳转路径 */
+    onNavigate: (listener: (path: string) => void) => void
+  }
 }

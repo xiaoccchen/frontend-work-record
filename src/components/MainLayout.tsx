@@ -6,6 +6,7 @@ import {
 } from '@ant-design/icons'
 import { Layout, Menu } from 'antd'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useDailyReminder } from '@/hooks/useDailyReminder'
 
 const { Sider, Content } = Layout
 
@@ -20,6 +21,7 @@ const MENU_ITEMS = [
 export default function MainLayout() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  useDailyReminder()
 
   return (
     <Layout className="h-screen">

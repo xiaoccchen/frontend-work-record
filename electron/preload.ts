@@ -36,6 +36,12 @@ const api: DesktopApi = {
     replaceAll: (data) => ipcRenderer.invoke('data:replace-all', data),
     clearAll: () => ipcRenderer.invoke('data:clear-all'),
   },
+  app: {
+    notify: (title, body) => ipcRenderer.invoke('app:notify', title, body),
+    onNavigate: (listener) => {
+      ipcRenderer.on('app:navigate', (_event, path: string) => listener(path))
+    },
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

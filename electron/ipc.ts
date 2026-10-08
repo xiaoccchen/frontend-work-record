@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, Notification } from 'electron'
 import type Database from 'better-sqlite3'
 import type {
   AppSetting,
@@ -301,6 +301,27 @@ export function registerIpcHandlers(db: Database.Database): void {
       clearAllPhrases.run()
       clearAllSettings.run()
     })()
+  })
+
+  // 记录提醒：主进程弹系统通知，点击后聚焦窗口并让渲染进程跳转
+  ipcMain.handle('app:notify', (event, title: string, body: string) => {
+    if (!Notification.isSupported()) {
+      return
+    }
+    const notification = new Notification({ title, body })
+    notification.on('click', () => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) {
+        return
+      }
+      if (win.isMinimized()) {
+        win.restore()
+      }
+      win.show()
+      win.focus()
+      win.webContents.send('app:navigate', '/record')
+    })
+    notification.show()
   })
 }
 

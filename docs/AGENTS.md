@@ -1,26 +1,31 @@
 # 本地轻量化前端开发工作日志记录工具AI 开发指令
 
 ## 项目概述
+
 这是一个本地轻量化前端开发工作日志记录工具，使用 React + TypeScript 开发。
 
 ## 开发规范
+
 - 使用 TypeScript，确保类型安全
 - 组件使用函数式组件 + Hooks
 - 使用 Tailwind CSS 编写样式
 - 所有数据存储在 SQLite
 
 ## 代码风格
+
 - 使用 ESLint 和 Prettier
 - 组件名使用 PascalCase
 - 函数名使用 camelCase
 - 常量使用 UPPER_SNAKE_CASE
 
 ## 测试要求
+
 - 每个功能完成后手动测试
 - 确保数据正确存储和读取
 - 测试各种边界情况
 
 ## 注意事项
+
 - 保持代码简洁，避免过度设计
 - 优先实现核心功能
 
@@ -75,19 +80,12 @@ TECH_DESIGN.md 写的 Element Plus / Pinia 属 Vue 生态，与本文档的 Reac
 - 项目字典：`project` 表全链路打通 —— `electron/ipc.ts` 的 `projects:*`、`store/projectStore.ts`、设置页 CRUD 表格；工作录入的项目名候选取「字典 ∪ 历史日志用过的名称」，保存新名称后弹窗询问是否入库
 - 设置页数据管理：`pages/SettingsPage.tsx` 的备份导出 / 恢复导入 / 清空全部数据；整表覆盖与清空走主进程事务（`data:replace-all` / `data:clear-all`），恢复后统一重新 hydrate 五个 store。同页另有「项目字典」「快捷短语」两张 CRUD 表格卡片（结构一致，可直接照抄新增同类字典）
 - 存储层 v2（SCHEMA_VERSION 1 → 2）：新增 `quick_phrase`（快捷短语）与 `app_setting`（键值配置）两表，`electron/{db,ipc,preload}.ts` 与 `services/repositories.ts` 双实现、`store/quickPhraseStore.ts`、`store/settingsStore.ts` 均已打通；升级到 v2 时灌入 `DEFAULT_QUICK_PHRASES` 初值（只在迁移那一次，删光后不复活），备份/恢复/清空已覆盖两张新表，旧备份缺这两张表时按空数据兼容
+- 定时记录提醒：设置页新增「记录提醒」卡片（开关 + 提醒时间，键名集中在 `utils/constants.ts` 的 `SETTING_KEYS`，默认时间 `DEFAULT_REMINDER_TIME`）；`hooks/useDailyReminder.ts` 半分钟轮询，命中时间且当日未提醒过才触发，触发时先占位 `lastFiredDate` 防重复；桌面端走主进程 `Notification`（`DesktopApi.app.notify` 经 IPC `app:notify`，点击回传 `app:navigate` 由渲染进程跳 `/record`），浏览器回退 Notification API（开启开关时申请授权，点击通知跳 `/record`）；在 `components/MainLayout.tsx` 挂载
 
 未完成：
 
 - 桌面端打包（electron-builder 安装包）尚未接入
-- 数据统计概览、深浅色主题
-- 定时记录提醒尚未实现（`app_setting` 存储层已就绪）
-
-### 剩余计划（技术选型已确认，按此顺序执行）
-
-- **C 数据统计概览**：新增 `utils/stats.ts`（纯函数：工作类型占比、工作量等级分布、按月条目数/工时趋势、重点项目 Top N、重点工作数）+ `pages/StatsPage.tsx`；`router/index.tsx` 加 `/stats`，`MainLayout` 菜单加一项（排在「日志管理」之后）。周期选择复用 `SummaryPage` 的 Segmented 模式。**不引入第三方图表库**，图表用 antd `Statistic` + 自绘占比条 / SVG 折线
-- **D 年度总结**：`utils/date.ts` 加 `getYearRange(year)`；`SummaryPage` 的 `PeriodType` 增加 `'year'` 并复用现成 `yearOptions`；`utils/summary.ts` 的 `buildSummaryContent` 无需改动（周期由入参决定）
-- **E Word 导出**：新增 `utils/markdown.ts` 的 `markdownToHtml`（只覆盖总结生成用到的语法：`#` 标题、`**加粗**`、`-` 列表、段落，风格对齐 `summaryToPlainText`）；`utils/download.ts` 加 `downloadWordFile`（Word 兼容头 + `application/msword` 的 .doc Blob，零依赖）；`SummaryPage` 的 `handleExport` 扩展 `'doc'` 分支
-- **F 定时记录提醒**：设置项写入 `app_setting`（键 `reminder.enabled` / `reminder.time` / `reminder.lastFiredDate`）；新增 `hooks/useDailyReminder.ts` 做分钟级轮询，命中时间且当日未触发过才提醒，触发后回写 `lastFiredDate`；桌面端走主进程 `Notification`（新增 IPC `app:notify`），浏览器回退 Notification API（需授权）；点击提醒跳 `/record`，设置页加「记录提醒」卡片
+- 深浅色主题
 
 数据模型对应的类型定义集中在 `src/types/index.ts`（`WorkRecord` / `WorkRecordDraft` / `Project` / `ProjectDraft` / `QuickPhrase` / `QuickPhraseDraft` / `AppSetting` / `WorkSummary` / `BackupData` / `BackupFile` / `DesktopApi`），工作类型枚举见 `src/utils/constants.ts`。备份文件格式为 `BackupFile`（`app` 标识 + `schemaVersion` + `exportedAt` + 五张表数据：`work_record` / `work_summary` / `project` / `quick_phrase` / `app_setting`），`schemaVersion` 取自 `utils/constants.ts` 的 `DATA_SCHEMA_VERSION`，**必须与 `electron/db.ts` 的 `SCHEMA_VERSION` 同步递增**（当前均为 2）。
 
@@ -98,4 +96,5 @@ TECH_DESIGN.md 写的 Element Plus / Pinia 属 Vue 生态，与本文档的 Reac
 - 桌面模式（Electron + SQLite）：`npm run dev:desktop`；打包产物验证 `npm run build:desktop` 后 `npx electron .`
 - Electron 冒烟：可加 `--remote-debugging-port=9222` 后连 CDP 在渲染进程里直接调 `window.api` 验证 IPC 链路。**冒烟必须指向隔离的 userData 目录**，否则 `data:clear-all` 会清掉真实库：临时给 `vite.config.ts` 的 `main.onstart` 传 `startup(['.', '--no-sandbox', '--remote-debugging-port=9222', '--user-data-dir=<临时目录>'])`，验证完回滚该改动；`vite-plugin-electron` 本身也认 `REMOTE_DEBUGGING_PORT` 环境变量。另注意冒烟环境下主进程可能报 `Network service crashed` 导致首屏空白，用 CDP 的 `Page.navigate` 显式导航一次即可加载。
 - 更省事的等价冒烟（无需改 `vite.config.ts`）：`npm run build:desktop` 后 `npx electron . --no-sandbox --remote-debugging-port=9222 --user-data-dir=<临时目录>`，再用 Node（≥22 自带全局 `WebSocket`）从 `http://127.0.0.1:9222/json/list` 取页面 `webSocketDebuggerUrl`，发 `Runtime.evaluate`（`awaitPromise: true`）调用 `window.api.*`；库版本与表结构可直接用 better-sqlite3 只读打开 `<临时目录>/work-record.db` 核对。
+- 浏览器模式通知链路：Chrome（headless，`--remote-debugging-port`）打开 `npm run dev` 的页面，用 `Page.addScriptToEvaluateOnNewDocument` 在文档加载前注入 `Notification` 替身（记录构造次数/参数与 `requestPermission` 调用、可切换 `permission`），即可在 `granted` / `default` 两态下断言提醒是否触发、点击是否跳 `/record`、是否回写 `lastFiredDate`；**原生授权弹窗 headless 下无法自动化，仍需人工点一次**。注意 `Page.navigate` 到 `/` 会被重定向到 `/record`，验证设置页开关要显式导航到 `/settings`。
 - 浏览器自动化工具无法驱动 antd 的 `RangePicker`（单日期选择器可以），涉及区间选择器的验证需人工点一次
